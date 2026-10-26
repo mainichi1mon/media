@@ -1,0 +1,32 @@
+# まいにち1もん：Mac mini の毎朝の投稿が記録されたかを、GitHub 側から見張る（Mac が止まっていても気づけるように）。
+# Mac の autopost.sh は投稿後に status/<日付>.json を push する。7:40 JST になってもそれが無い・ok=false なら
+# この workflow を失敗させて Issue を作る → GitHub からメール／アプリ通知が届く。
+name: 投稿の見張り
+on:
+  schedule:
+    - cron: '40 22 * * *'   # 毎日 7:40 JST（GitHub の混雑で数分〜数十分遅れることがある）
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 今日の投稿記録を確認
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE=$(TZ=Asia/Tokyo date +%F)
+          if [[ "$DATE" < "2026-10-19" ]]; then echo "対象外"; exit 0; fi
+          F="status/$DATE.json"
+          if [ -f "$F" ] && [ "$(jq -r .ok "$F")" = "true" ]; then
+            echo "OK: $DATE $(jq -c . "$F")"; exit 0
+          fi
+          DETAIL=$( [ -f "$F" ] && jq -r .detail "$F" || echo "記録なし（Mac mini が止まっている・ログイン待ち・ネット切断の可能性）" )
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "⚠️ $DATE まいにち1もん の投稿が確認できません" \
+            --body "7:40 の時点で $F が見つからないか ok=false です。詳細：$DETAIL
+          Mac mini の電源・ログイン状態を確認し、Claude Code に「今日の投稿を見て」と伝えてください。"
+          exit 1
